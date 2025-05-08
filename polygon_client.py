@@ -9,7 +9,12 @@ class PolygonWebsocketClient:
     """
     def __init__(self, api_key: str, message_queue: asyncio.Queue,
                  feed: str = "stocks", max_reconnects: int = 5):
-        self.api_key = api_key
+        self.api_key = api_key.strip()  # Ensure API key is trimmed
+        
+        # Validate API key format
+        if not self.api_key or len(self.api_key) < 10:  # Simple validation
+            print("WARNING: API key appears to be invalid or too short!")
+            
         self.queue = message_queue
         self.url = f"wss://socket.polygon.io/{feed}"
         self.subs = set()
