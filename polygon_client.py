@@ -25,10 +25,18 @@ class PolygonWebsocketClient:
         while True:
             try:
                 async with connect(self.url, ssl=ssl_ctx) as ws:
-                    # Authenticate
-                    await ws.send(json.dumps({"action":"auth","params":self.api_key}))
+                    # Authenticate - FIXED: params needs to be an array
+                    await ws.send(json.dumps({"action":"auth","params":[self.api_key]}))
                     auth = json.loads(await ws.recv())
-                    if auth[0].get("status","") not in ("authorized","auth_success"):
+                    
+                    # More robust auth check that handles different response formats
+                    is_authorized = False
+                    if isinstance(auth, list) and len(auth) > 0:
+                        status = auth[0].get("status", "")
+                        is_authorized = status in ("authorized", "auth_success")
+                    
+                    if not is_authorized:
+                        print(f"Auth response: {auth}")  # For debugging
                         raise RuntimeError("Polygon auth failed")
 
                     # Re-subscribe on reconnect
@@ -40,7 +48,8 @@ class PolygonWebsocketClient:
                         data = json.loads(raw)
                         await self.queue.put(data)
 
-            except Exception:
+            except Exception as e:
+                print(f"WebSocket error: {str(e)}")
                 reconnects += 1
                 if reconnects > self.max_reconnects:
                     raise
@@ -62,8 +71,10 @@ class PolygonWebsocketClient:
         to_add = self.scheduled_subs - self.subs
         to_rem = self.subs - self.scheduled_subs
         if to_add:
-            await ws.send(json.dumps({"action":"subscribe","params":",".join(to_add)}))
+            # FIXED: params needs to be an array
+            await ws.send(json.dumps({"action":"subscribe","params":list(to_add)}))
         if to_rem:
-            await ws.send(json.dumps({"action":"unsubscribe","params":",".join(to_rem)}))
+            # FIXED: params needs to be an array
+            await ws.send(json.dumps({"action":"unsubscribe","params":list(to_rem)}))
         self.subs = set(self.scheduled_subs)
         self.schedule_resub = False
