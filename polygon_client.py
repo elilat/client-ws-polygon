@@ -1,4 +1,7 @@
+# polygon_client.py
 import ssl, json, asyncio
+import os
+import datetime
 from websockets import connect
 import certifi
 
@@ -19,7 +22,22 @@ class PolygonWebsocketClient:
         self.scheduled_subs = set()
         self.schedule_resub = False
         self.max_reconnects = max_reconnects
+        
+        # Create logs directory if it doesn't exist
+        self.logs_dir = "polygon_logs"
+        os.makedirs(self.logs_dir, exist_ok=True)
+        
         print(f"Polygon client initialized with API key length: {len(self.api_key)}")
+    
+    def _log_response(self, data, message_type="message"):
+        """Log Polygon responses to a file with timestamp"""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d")
+        log_file = os.path.join(self.logs_dir, f"polygon_{timestamp}.log")
+        
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
+        with open(log_file, "a") as f:
+            f.write(f"[{current_time}] {message_type}: {json.dumps(data)}\n")
     
     async def connect(self):
         reconnects = 0
@@ -39,10 +57,12 @@ class PolygonWebsocketClient:
                     # First message is connection confirmation
                     connection_msg = json.loads(await ws.recv())
                     print(f"Connection message: {connection_msg}")
+                    self._log_response(connection_msg, "connection")
                     
                     # Wait for authentication message
                     auth_msg = json.loads(await ws.recv())
                     print(f"Auth message: {auth_msg}")
+                    self._log_response(auth_msg, "authentication")
                     
                     # Check for failed authentication
                     if (isinstance(auth_msg, list) and 
@@ -75,6 +95,9 @@ class PolygonWebsocketClient:
                         raw = await ws.recv()
                         data = json.loads(raw)
                         
+                        # Log every response from Polygon
+                        self._log_response(data, "data")
+                        
                         # Process message based on type
                         if isinstance(data, list) and data:
                             if data[0].get("ev") == "status":
@@ -86,6 +109,7 @@ class PolygonWebsocketClient:
                             
             except Exception as e:
                 print(f"WebSocket error: {str(e)}")
+                self._log_response({"error": str(e)}, "error")
                 reconnects += 1
                 if reconnects > self.max_reconnects:
                     print(f"Maximum reconnect attempts ({self.max_reconnects}) reached. Giving up.")
@@ -117,13 +141,17 @@ class PolygonWebsocketClient:
             print(f"Subscribing to: {to_add}")
             # For subscription, params should be a comma-separated string for multiple topics
             topics_str = ",".join(to_add)
-            await ws.send(json.dumps({"action":"subscribe","params": topics_str}))
+            sub_payload = {"action":"subscribe","params": topics_str}
+            await ws.send(json.dumps(sub_payload))
+            self._log_response(sub_payload, "subscribe_request")
         
         if to_rem:
             print(f"Unsubscribing from: {to_rem}")
             # For unsubscription, params should also be a comma-separated string
             topics_str = ",".join(to_rem)
-            await ws.send(json.dumps({"action":"unsubscribe","params": topics_str}))
+            unsub_payload = {"action":"unsubscribe","params": topics_str}
+            await ws.send(json.dumps(unsub_payload))
+            self._log_response(unsub_payload, "unsubscribe_request")
         
         self.subs = set(self.scheduled_subs)
         self.schedule_resub = False
