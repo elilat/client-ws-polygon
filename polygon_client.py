@@ -9,13 +9,17 @@ class PolygonWebsocketClient:
     """
     def __init__(self, api_key: str, message_queue: asyncio.Queue,
                  feed: str = "stocks", max_reconnects: int = 5):
-        self.api_key = api_key
+        self.api_key = api_key.strip()  # Ensure no whitespace
+        if not self.api_key:
+            raise ValueError("API key cannot be empty")
+            
         self.queue = message_queue
         self.url = f"wss://socket.polygon.io/{feed}"
         self.subs = set()
         self.scheduled_subs = set()
         self.schedule_resub = False
         self.max_reconnects = max_reconnects
+        print(f"Polygon client initialized with API key length: {len(self.api_key)}")
     
     async def connect(self):
         reconnects = 0
@@ -24,80 +28,71 @@ class PolygonWebsocketClient:
         
         while True:
             try:
+                print(f"Attempting to connect to {self.url}...")
                 async with connect(self.url, ssl=ssl_ctx) as ws:
                     # Send authentication request
-                    await ws.send(json.dumps({"action":"auth","params":[self.api_key]}))
+                    auth_payload = {"action":"auth","params":[self.api_key]}
+                    print(f"Sending auth request with key length: {len(self.api_key)}")
+                    await ws.send(json.dumps(auth_payload))
                     
                     # First message is connection confirmation
                     connection_msg = json.loads(await ws.recv())
                     print(f"Connection message: {connection_msg}")
                     
-                    # For Polygon's API, the 'connected' status is expected for the first message
-                    # Now wait for the actual auth response
-                    if connection_msg and isinstance(connection_msg, list) and connection_msg[0].get("status") == "connected":
-                        try:
-                            # Wait for authentication confirmation with a timeout
-                            auth_timeout = asyncio.create_task(asyncio.sleep(5))  # 5-second timeout
-                            auth_response_task = asyncio.create_task(ws.recv())
-                            
-                            # Wait for either auth response or timeout
-                            done, pending = await asyncio.wait(
-                                {auth_response_task, auth_timeout},
-                                return_when=asyncio.FIRST_COMPLETED
-                            )
-                            
-                            # Cancel pending tasks
-                            for task in pending:
-                                task.cancel()
-                                
-                            # Check if we got the auth response
-                            if auth_response_task in done:
-                                auth_msg = json.loads(auth_response_task.result())
-                                print(f"Auth message: {auth_msg}")
-                                
-                                # Check for successful authentication
-                                if auth_msg and isinstance(auth_msg, list) and auth_msg[0].get("status") in ("success", "auth_success", "authorized"):
-                                    print("Authentication successful!")
-                                elif connection_msg[0].get("message", "").lower() == "connected successfully":
-                                    # Some Polygon API versions might only send the connected message and not a separate auth message
-                                    print("Using connection success as auth success")
-                                else:
-                                    print(f"Authentication failed: {auth_msg}")
-                                    raise RuntimeError("Polygon auth failed")
-                            else:
-                                # If we timed out waiting for auth response, assume the connected message is sufficient
-                                print("No explicit auth message received, proceeding with connection")
-                        except Exception as e:
-                            print(f"Error during authentication phase: {str(e)}")
-                            raise
+                    # Wait for authentication message
+                    auth_msg = json.loads(await ws.recv())
+                    print(f"Auth message: {auth_msg}")
+                    
+                    # Check for failed authentication
+                    if (isinstance(auth_msg, list) and 
+                        auth_msg[0].get("status") == "auth_failed"):
+                        error_msg = auth_msg[0].get("message", "Unknown error")
+                        print(f"Authentication explicitly failed: {error_msg}")
+                        
+                        # If we keep failing, suggest API key issues
+                        if reconnects >= 2:
+                            print("CRITICAL: Multiple authentication failures.")
+                            print("Please verify your Polygon API key is correct and has WebSocket permissions.")
+                            print("Suggestion: Check if your account subscription allows WebSocket access.")
+                        
+                        raise RuntimeError(f"Polygon auth failed: {error_msg}")
+                    
+                    # Check for successful authentication
+                    if (isinstance(auth_msg, list) and 
+                        auth_msg[0].get("status") in ("success", "auth_success", "authorized")):
+                        print("Authentication successful!")
                     else:
-                        print(f"Unexpected connection response: {connection_msg}")
-                        if isinstance(connection_msg, list) and connection_msg[0].get("status") == "auth_failed":
-                            raise RuntimeError(f"Polygon auth failed: {connection_msg[0].get('message', 'No message')}")
-                        raise RuntimeError("Unexpected connection response")
+                        print(f"Unexpected authentication response: {auth_msg}")
+                        raise RuntimeError("Unexpected authentication response")
                     
                     # Re-subscribe on reconnect
                     await self._resubscribe(ws)
                     
                     # Main message processing loop
+                    print("Entering main message loop...")
                     while True:
                         raw = await ws.recv()
                         data = json.loads(raw)
                         
-                        # Only put trade data in the queue, handle status messages separately
-                        if isinstance(data, list) and data and data[0].get("ev") != "status":
-                            await self.queue.put(data)
+                        # Process message based on type
+                        if isinstance(data, list) and data:
+                            if data[0].get("ev") == "status":
+                                print(f"Status message: {data}")
+                            else:
+                                await self.queue.put(data)
                         else:
-                            print(f"Status message: {data}")
+                            print(f"Unexpected message format: {data}")
                             
             except Exception as e:
                 print(f"WebSocket error: {str(e)}")
                 reconnects += 1
                 if reconnects > self.max_reconnects:
+                    print(f"Maximum reconnect attempts ({self.max_reconnects}) reached. Giving up.")
                     raise
+                
                 # Exponential backoff for reconnection attempts
                 backoff_time = min(2**reconnects, 30)
-                print(f"Reconnecting in {backoff_time} seconds...")
+                print(f"Reconnecting in {backoff_time} seconds... (Attempt {reconnects}/{self.max_reconnects})")
                 await asyncio.sleep(backoff_time)
     
     def subscribe(self, symbol: str):
