@@ -6,12 +6,9 @@ from polygon_client import PolygonWebsocketClient
 
 # ─── Load and validate env ────────────────────────────────────
 load_dotenv()  # loads .env locally; in prod set real env-vars
-API_KEY       = os.getenv("POLYGON_API_KEY", "").strip()  # Added .strip() to remove whitespace
-WS_API_KEYS   = set(k.strip() for k in os.getenv("WS_API_KEYS", "").split(",") if k.strip())
+API_KEY       = os.getenv("POLYGON_API_KEY", "")
+WS_API_KEYS   = set(os.getenv("WS_API_KEYS", "").split(","))
 ALLOWED_ORIGS = os.getenv("ALLOWED_ORIGINS", "")
-
-print(f"API Key length: {len(API_KEY)}")  # Debug: Check key length (don't print the actual key)
-print(f"WS API Keys count: {len(WS_API_KEYS)}")  # Debug: Check number of websocket keys
 
 if not API_KEY or not WS_API_KEYS or not ALLOWED_ORIGS:
     raise RuntimeError("POLYGON_API_KEY, WS_API_KEYS, ALLOWED_ORIGINS must be set")
