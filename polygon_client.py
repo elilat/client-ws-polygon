@@ -27,16 +27,31 @@ class PolygonWebsocketClient:
                 async with connect(self.url, ssl=ssl_ctx) as ws:
                     # Authenticate - FIXED: params needs to be an array
                     await ws.send(json.dumps({"action":"auth","params":[self.api_key]}))
-                    auth = json.loads(await ws.recv())
                     
-                    # More robust auth check that handles different response formats
+                    # First response is just connection confirmation
+                    initial_response = json.loads(await ws.recv())
+                    print(f"Initial response: {initial_response}")
+                    
+                    # The second response should be the auth confirmation
+                    auth_response = json.loads(await ws.recv())
+                    print(f"Auth response: {auth_response}")
+                    
+                    # Check auth status (more permissive to handle different API versions)
                     is_authorized = False
-                    if isinstance(auth, list) and len(auth) > 0:
-                        status = auth[0].get("status", "")
-                        is_authorized = status in ("authorized", "auth_success")
+                    if isinstance(auth_response, list) and len(auth_response) > 0:
+                        ev_type = auth_response[0].get("ev", "")
+                        status = auth_response[0].get("status", "")
+                        message = auth_response[0].get("message", "").lower()
+                        
+                        # Accept various success indicators
+                        is_authorized = (
+                            status in ("authorized", "auth_success") or
+                            ev_type == "status" and "success" in message or
+                            "authenticated" in message
+                        )
                     
                     if not is_authorized:
-                        print(f"Auth response: {auth}")  # For debugging
+                        print(f"Failed to authenticate. Response: {auth_response}")
                         raise RuntimeError("Polygon auth failed")
 
                     # Re-subscribe on reconnect
