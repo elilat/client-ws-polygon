@@ -30,8 +30,9 @@ class PolygonWebsocketClient:
             try:
                 print(f"Attempting to connect to {self.url}...")
                 async with connect(self.url, ssl=ssl_ctx) as ws:
-                    # Send authentication request
-                    auth_payload = {"action":"auth","params":[self.api_key]}
+                    # Send authentication request - CORRECTED FORMAT
+                    # The API key should be a string, not an array
+                    auth_payload = {"action":"auth","params": self.api_key}
                     print(f"Sending auth request with key length: {len(self.api_key)}")
                     await ws.send(json.dumps(auth_payload))
                     
@@ -59,7 +60,7 @@ class PolygonWebsocketClient:
                     
                     # Check for successful authentication
                     if (isinstance(auth_msg, list) and 
-                        auth_msg[0].get("status") in ("success", "auth_success", "authorized")):
+                        auth_msg[0].get("status") == "auth_success"):
                         print("Authentication successful!")
                     else:
                         print(f"Unexpected authentication response: {auth_msg}")
@@ -114,11 +115,15 @@ class PolygonWebsocketClient:
         
         if to_add:
             print(f"Subscribing to: {to_add}")
-            await ws.send(json.dumps({"action":"subscribe","params":list(to_add)}))
+            # For subscription, params should be a comma-separated string for multiple topics
+            topics_str = ",".join(to_add)
+            await ws.send(json.dumps({"action":"subscribe","params": topics_str}))
         
         if to_rem:
             print(f"Unsubscribing from: {to_rem}")
-            await ws.send(json.dumps({"action":"unsubscribe","params":list(to_rem)}))
+            # For unsubscription, params should also be a comma-separated string
+            topics_str = ",".join(to_rem)
+            await ws.send(json.dumps({"action":"unsubscribe","params": topics_str}))
         
         self.subs = set(self.scheduled_subs)
         self.schedule_resub = False
