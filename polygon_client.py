@@ -93,7 +93,7 @@ class PolygonWebsocketClient:
                 await asyncio.sleep(backoff)
 
     def subscribe(self, symbol: str):
-        topic = f"T.{symbol.upper()}"
+        topic = f"A.{symbol.upper()}"
         if topic in self.subs:
             return
         self.subs.add(topic)
@@ -106,7 +106,7 @@ class PolygonWebsocketClient:
             self._log_response(payload, "subscribe_request")
 
     def unsubscribe(self, symbol: str):
-        topic = f"T.{symbol.upper()}"
+        topic = f"A.{symbol.upper()}"
         if topic not in self.subs:
             return
         self.subs.remove(topic)
