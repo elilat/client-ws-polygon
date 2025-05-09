@@ -68,7 +68,7 @@ async def broadcaster():
             for msg in batch:
                 message_count += 1
 
-                if msg.get("ev") != "T":
+                if msg.get("ev") != "A":
                     continue
 
                 sym = msg.get("sym")
